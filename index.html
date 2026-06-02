@@ -591,6 +591,35 @@
   }
   .ovl-tip b{color:var(--txt)}
 
+
+  /* SUPERSET / CIRCUIT GROUPING */
+  .pair-block{
+    margin-bottom:16px;padding:12px;border-radius:18px;
+    background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.02));
+    border:1px solid var(--line);
+  }
+  .pair-block.superset{border-color:rgba(255,122,156,.35);box-shadow:0 0 0 1px rgba(255,122,156,.08) inset}
+  .pair-block.circuit{border-color:rgba(61,209,160,.35);box-shadow:0 0 0 1px rgba(61,209,160,.08) inset}
+  .pair-head{
+    display:flex;gap:10px;align-items:flex-start;justify-content:space-between;
+    padding:4px 4px 12px;flex-wrap:wrap;
+  }
+  .pair-kicker{
+    font-family:'Bebas Neue';font-size:1.45rem;letter-spacing:.06em;line-height:1;
+    padding:8px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);
+  }
+  .pair-block.superset .pair-kicker{color:var(--accent-soft);border-color:rgba(255,122,156,.4)}
+  .pair-block.circuit .pair-kicker{color:var(--green);border-color:rgba(61,209,160,.4)}
+  .pair-desc{font-size:.8rem;color:var(--muted);max-width:420px;line-height:1.45;font-weight:600}
+  .pair-slot{
+    display:inline-flex;align-items:center;justify-content:center;min-width:52px;height:28px;
+    padding:0 10px;border-radius:999px;font-size:.72rem;font-weight:800;letter-spacing:.06em;
+    margin-bottom:6px;
+  }
+  .pair-slot.superset{background:rgba(255,122,156,.14);color:var(--accent-soft);border:1px solid rgba(255,122,156,.35)}
+  .pair-slot.circuit{background:rgba(61,209,160,.12);color:var(--green);border:1px solid rgba(61,209,160,.35)}
+  .pair-flow{font-size:.74rem;color:var(--gold);font-weight:700;margin-bottom:8px}
+
   /* TREND INSIGHT */
   .insight-card{
     background:var(--panel);border:1px solid var(--line);border-radius:14px;
@@ -1480,7 +1509,32 @@ function overloadHint(log){
   return `<div class="ovl-tip">🎯 Beat last: <b>${tip}</b></div>`;
 }
 
-function exCard(di,idx,e,isCore){
+function parsePairing(note=''){
+  const m=String(note).match(/\b(Superset|Circuit)\s+(\d+)([A-Z])\b/i);
+  if(!m) return null;
+  return {kind:m[1].toLowerCase(), group:m[2], slot:m[3].toUpperCase()};
+}
+
+function formatPairNote(note='', meta){
+  if(!meta) return note;
+  const withMatch=String(note).match(/\b(?:Superset|Circuit)\s+\d+[A-Z]\s+with\s+([^.]*)\.\s*(.*)$/i);
+  if(withMatch){
+    const leader=meta.kind==='superset' ? 'Pairs with ' : 'Move with ';
+    return `${leader}${withMatch[1]}. ${withMatch[2]}`.trim();
+  }
+  return String(note).replace(/\b(?:Superset|Circuit)\s+\d+[A-Z]\.?\s*/i,'').trim();
+}
+
+function pairHeader(meta, count){
+  const title=meta.kind==='superset' ? `SUPERSET ${meta.group}` : `CIRCUIT ${meta.group}`;
+  const flow=Array.from({length:count}, (_,i)=> meta.group + String.fromCharCode(65+i)).join(' → ');
+  const desc=meta.kind==='superset'
+    ? `Do ${flow}, then rest 1:30. Repeat until all sets are complete.`
+    : `Move through ${flow}, then rest 1:30. Repeat until all rounds are complete.`;
+  return `<div class="pair-block ${meta.kind}"><div class="pair-head"><div><div class="pair-kicker">${title}</div><div class="pair-flow">${flow}</div></div><div class="pair-desc">${desc}</div></div>`;
+}
+
+function exCard(di,idx,e,isCore,pairMeta=null){
   const on=state[di][idx];
   const lk=logKey(di,e.n);
   const log=logs[lk]||{w:'',r:'',last:''};
@@ -1489,14 +1543,16 @@ function exCard(di,idx,e,isCore){
   // auto-fill inputs with last session's numbers (so you just nudge up)
   const wVal = (log.w!=='' && log.w!=null) ? log.w : (log.lw!=null?log.lw:'');
   const rVal = (log.r!=='' && log.r!=null) ? log.r : (log.lr!=null?log.lr:'');
+  const pairBadge=pairMeta ? `<div class="pair-slot ${pairMeta.kind}">${pairMeta.group}${pairMeta.slot}</div>` : '';
+  const noteTxt=formatPairNote(e.note,pairMeta);
   return `
   <div class="ex${on?' checked':''}">
     <div class="ex-top">
       <button class="check${on?' on':''}" onclick="toggle(${di},${idx})"></button>
-      <div class="ex-info"><h4>${e.n}</h4><div class="scheme">${e.s}</div></div>
+      <div class="ex-info">${pairBadge}<h4>${e.n}</h4><div class="scheme">${e.s}</div></div>
       ${vid}
     </div>
-    <div class="ex-note">${e.note}</div>
+    <div class="ex-note">${noteTxt}</div>
     ${overloadHint(log)}
     <div class="log-row">
       <input class="log-in" type="number" inputmode="decimal" placeholder="lb" value="${wVal}"
@@ -1530,7 +1586,28 @@ function buildPanels(){
 
     // MAIN WORK
     html+=`<div class="block-label">${d.mainLabel||'🏋️ Main Work'}</div>`;
-    d.ex.forEach((e,ei)=>{ html+=exCard(di,ei,e,false); });
+    for(let ei=0; ei<d.ex.length; ei++){
+      const meta=parsePairing(d.ex[ei].note||'');
+      if(meta){
+        const grouped=[{e:d.ex[ei], idx:ei, meta}];
+        while(ei+1<d.ex.length){
+          const nextMeta=parsePairing(d.ex[ei+1].note||'');
+          if(nextMeta && nextMeta.kind===meta.kind && nextMeta.group===meta.group){
+            ei++;
+            grouped.push({e:d.ex[ei], idx:ei, meta:nextMeta});
+          } else break;
+        }
+        if(grouped.length>1){
+          html+=pairHeader(meta, grouped.length);
+          grouped.forEach(item=>{ html+=exCard(di,item.idx,item.e,false,item.meta); });
+          html+=`</div>`;
+          continue;
+        }
+        html+=exCard(di,ei,d.ex[ei],false,meta);
+        continue;
+      }
+      html+=exCard(di,ei,d.ex[ei],false);
+    }
 
     panel.innerHTML=html;
     main.appendChild(panel);
