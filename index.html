@@ -225,6 +225,67 @@
     background:rgba(34,213,126,.1);padding:5px 10px;border-radius:8px;
   }
 
+
+  /* PER-SET TRACKING */
+  .set-track{
+    margin:0 16px 16px 60px;
+    background:var(--panel-2);border:1px solid var(--line);
+    border-radius:13px;padding:12px;
+  }
+  .set-track-head{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    margin-bottom:10px;flex-wrap:wrap;
+  }
+  .set-track-title{
+    font-size:.78rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--accent-soft);
+  }
+  .set-track-hint{font-size:.72rem;color:var(--muted);font-weight:600}
+  .set-row{
+    display:grid;grid-template-columns:54px 1fr 14px 1fr 34px 28px;
+    gap:7px;align-items:center;padding:8px 0;border-top:1px solid var(--line);
+  }
+  .set-row:first-of-type{border-top:none}
+  .set-row-hidden{display:none}
+  .set-unlock{
+    margin-top:8px;padding:9px 11px;border-radius:10px;
+    background:rgba(255,184,0,.08);border:1px dashed rgba(255,184,0,.35);
+    color:var(--gold);font-size:.74rem;font-weight:800;line-height:1.35;
+  }
+  .set-label{font-size:.74rem;font-weight:900;color:var(--txt);white-space:nowrap}
+  .set-in{
+    width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);
+    border-radius:9px;padding:9px 8px;font-family:'Archivo';font-size:.82rem;font-weight:700;
+    -moz-appearance:textfield;
+  }
+  .set-in::-webkit-outer-spin-button,.set-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .set-in:focus{outline:none;border-color:var(--accent-soft)}
+  .set-x{color:var(--muted);font-weight:900;text-align:center}
+  .set-unit{font-size:.68rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .set-done{
+    width:28px;height:28px;border-radius:8px;border:2px solid var(--line);background:transparent;
+    display:grid;place-items:center;cursor:pointer;transition:.2s;
+  }
+  .set-done.on{background:var(--green);border-color:var(--green)}
+  .set-done.on::after{content:'✓';color:#06210f;font-weight:900;font-size:.9rem}
+  .set-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px}
+  .set-save{
+    background:var(--accent);border:1px solid var(--accent);color:#fff;
+    padding:9px 15px;border-radius:9px;font-family:'Archivo';font-weight:900;font-size:.78rem;
+    cursor:pointer;transition:.2s;
+  }
+  .set-save:active{transform:scale(.97)}
+  .set-last{
+    font-size:.72rem;color:var(--green);font-weight:800;
+    background:rgba(34,213,126,.1);padding:6px 9px;border-radius:8px;line-height:1.35;
+  }
+  @media(max-width:430px){
+    .set-track{margin-left:16px}
+    .set-row{grid-template-columns:48px 1fr 12px 1fr 28px 28px;gap:5px}
+    .set-in{padding:8px 6px;font-size:.78rem}
+    .set-unit{font-size:.62rem}
+  }
+
   /* WEEK PREVIEW */
   .preview-toggle{
     max-width:760px;margin:6px auto 0;padding:0 22px;
@@ -1103,7 +1164,7 @@
 
 <footer>
   Progress saves automatically on this device and <b>auto-resets each Monday</b>.<br>
-  Rest 1:30 between working sets unless noted · warm up first · track weights/reps. Video links open exercise demos on YouTube.
+  Rest 1:30 between working sets unless noted · warm up first · track every set. Video links open exercise demos on YouTube.
 </footer>
 
 <script>
@@ -1465,7 +1526,14 @@ function loadState(){
     }
   }catch(e){}
   try{
-    Object.keys(localStorage).forEach(k=>{ if(k.startsWith('rodney_split_')&&k!==WEEK_KEY&&k!==LOG_KEY) localStorage.removeItem(k); });
+    Object.keys(localStorage).forEach(k=>{
+      // Only remove old dated workout-checkoff keys.
+      // Keep persistent data like rodney_split_weights and rodney_split_logs so progress carries into the next week.
+      if(k.startsWith('rodney_split_') && k!==WEEK_KEY && k!==LOG_KEY && k!=='rodney_split_weights'){
+        const suf=k.slice('rodney_split_'.length);
+        if(/^\d{4}_\d{1,2}_\d{1,2}$/.test(suf)) localStorage.removeItem(k);
+      }
+    });
   }catch(e){}
   return PROGRAM.map((d,i)=>Array(dayItems(i)).fill(false));
 }
@@ -1534,17 +1602,78 @@ function pairHeader(meta, count){
   return `<div class="pair-block ${meta.kind}"><div class="pair-head"><div><div class="pair-kicker">${title}</div><div class="pair-flow">${flow}</div></div><div class="pair-desc">${desc}</div></div>`;
 }
 
+function safeJS(str){ return String(str).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function setCountFromScheme(s=''){
+  const m=String(s).match(/(\d+)\s*[×xX]/);
+  if(m) return Math.max(1, parseInt(m[1],10)||1);
+  return 1;
+}
+function repUnitFromExercise(e){
+  const text=(e.n+' '+e.s+' '+(e.note||'')).toLowerCase();
+  if(text.includes('sec')) return 'sec';
+  if(text.includes('min')) return 'min';
+  if(text.includes('step') || text.includes('carry') || text.includes('walk') || text.includes('sled')) return 'steps';
+  return 'reps';
+}
+function normalizeSetLog(d,name,count){
+  const k=logKey(d,name);
+  let l=logs[k];
+  if(!l || typeof l!=='object') l={};
+  if(!Array.isArray(l.sets)){
+    const first={w:l.w||'', r:l.r||'', done:!!(l.w||l.r||l.last)};
+    l.sets=(first.w||first.r||first.done)?[first]:[];
+  }
+  while(l.sets.length<count) l.sets.push({w:'',r:'',done:false});
+  logs[k]=l;
+  return l;
+}
+function setSummaryLine(l){
+  if(!l || !Array.isArray(l.sets)) return l&&l.last?l.last:'';
+  const used=l.sets
+    .map((s,i)=>({s,i}))
+    .filter(x=>x.s && (x.s.done || x.s.w || x.s.r));
+  if(!used.length) return l.last||'';
+  return used.map(x=>`S${x.i+1}: ${x.s.w||'—'} lb × ${x.s.r||'—'}`).join(' · ');
+}
+
 function exCard(di,idx,e,isCore,pairMeta=null){
   const on=state[di][idx];
+  const setCount=setCountFromScheme(e.s);
+  const unit=repUnitFromExercise(e);
   const lk=logKey(di,e.n);
-  const log=logs[lk]||{w:'',r:'',last:''};
+  const log=normalizeSetLog(di,e.n,setCount);
   const vid=`<button class="ex-vid" onclick="openYT('${encodeURIComponent(e.q)}')" title="Watch demo on YouTube">${PLAY}<span class="vlbl">Video</span></button>`;
-  const lastTxt=log.last?`<span class="log-last">Last: ${log.last}</span>`:'';
-  // auto-fill inputs with last session's numbers (so you just nudge up)
-  const wVal = (log.w!=='' && log.w!=null) ? log.w : (log.lw!=null?log.lw:'');
-  const rVal = (log.r!=='' && log.r!=null) ? log.r : (log.lr!=null?log.lr:'');
+  const lastTxt=setSummaryLine(log)?`<span class="set-last">Last saved: ${setSummaryLine(log)}</span>`:'';
   const pairBadge=pairMeta ? `<div class="pair-slot ${pairMeta.kind}">${pairMeta.group}${pairMeta.slot}</div>` : '';
   const noteTxt=formatPairNote(e.note,pairMeta);
+  const safe=safeJS(e.n);
+  let setRows='';
+  let visibleMax=0;
+  // Show completed sets plus only the next set to complete.
+  // Example: Set 1 is visible first; completing it unlocks Set 2.
+  for(let vi=0; vi<setCount; vi++){
+    const st=log.sets[vi]||{w:'',r:'',done:false};
+    visibleMax=vi;
+    if(!st.done) break;
+  }
+  for(let si=0; si<setCount; si++){
+    const row=log.sets[si]||{w:'',r:'',done:false};
+    const isVisible=si<=visibleMax;
+    setRows+=`
+      <div class="set-row${isVisible?'':' set-row-hidden'}" data-set-index="${si}">
+        <div class="set-label">Set ${si+1}</div>
+        <input class="set-in" type="number" inputmode="decimal" placeholder="lb" value="${row.w||''}"
+          onchange="setSetLog(${di},'${safe}',${si},'w',this.value)">
+        <span class="set-x">×</span>
+        <input class="set-in" type="number" inputmode="numeric" placeholder="${unit}" value="${row.r||''}"
+          onchange="setSetLog(${di},'${safe}',${si},'r',this.value)">
+        <span class="set-unit">${unit}</span>
+        <button class="set-done${row.done?' on':''}" onclick="setSetDone(${di},'${safe}',${si},${row.done?'false':'true'})" title="Mark set complete / unlock next set"></button>
+      </div>`;
+  }
+  if(visibleMax<setCount-1){
+    setRows+=`<div class="set-unlock">🔒 Complete Set ${visibleMax+1} to unlock Set ${visibleMax+2}.</div>`;
+  }
   return `
   <div class="ex${on?' checked':''}">
     <div class="ex-top">
@@ -1554,14 +1683,16 @@ function exCard(di,idx,e,isCore,pairMeta=null){
     </div>
     <div class="ex-note">${noteTxt}</div>
     ${overloadHint(log)}
-    <div class="log-row">
-      <input class="log-in" type="number" inputmode="decimal" placeholder="lb" value="${wVal}"
-        onchange="setLog(${di},'${e.n.replace(/'/g,"\\'")}','w',this.value)">
-      <span class="log-x">×</span>
-      <input class="log-in" type="number" inputmode="numeric" placeholder="reps" value="${rVal}"
-        onchange="setLog(${di},'${e.n.replace(/'/g,"\\'")}','r',this.value)">
-      <button class="log-save" onclick="saveLift(${di},'${e.n.replace(/'/g,"\\'")}')">Save</button>
-      ${lastTxt}
+    <div class="set-track">
+      <div class="set-track-head">
+        <div class="set-track-title">Track every set</div>
+        <div class="set-track-hint">Enter weight × ${unit}; ✓ unlocks next set</div>
+      </div>
+      ${setRows}
+      <div class="set-actions">
+        <button class="set-save" onclick="saveLift(${di},'${safe}')">Save sets</button>
+        ${lastTxt}
+      </div>
     </div>
   </div>`;
 }
@@ -1658,21 +1789,42 @@ window.toggle=function(d,e){
   render();
 };
 
-// store typed weight/reps live
-window.setLog=function(d,name,field,val){
-  const k=logKey(d,name);
-  if(!logs[k]) logs[k]={w:'',r:'',last:''};
-  logs[k][field]=val;
+// store typed weight/reps for each individual set
+window.setSetLog=function(d,name,setIdx,field,val){
+  const count=Math.max(setIdx+1, 1);
+  const l=normalizeSetLog(d,name,count);
+  if(!l.sets[setIdx]) l.sets[setIdx]={w:'',r:'',done:false};
+  const wasDone=!!l.sets[setIdx].done;
+  l.sets[setIdx][field]=val;
+  // Once both values are entered, mark the set complete and reveal the next set.
+  if(l.sets[setIdx].w && l.sets[setIdx].r) l.sets[setIdx].done=true;
+  logs[logKey(d,name)]=l;
   saveLogs();
+  if(!wasDone && l.sets[setIdx].done) render();
 };
-// commit a lift entry → becomes "Last:" reference + drives overload hint
+window.setSetDone=function(d,name,setIdx,done){
+  const l=normalizeSetLog(d,name,setIdx+1);
+  if(!l.sets[setIdx]) l.sets[setIdx]={w:'',r:'',done:false};
+  l.sets[setIdx].done=!!done;
+  logs[logKey(d,name)]=l;
+  saveLogs();
+  render();
+};
+// commit all set entries → becomes Last saved reference + drives overload hint
 window.saveLift=function(d,name){
   const k=logKey(d,name);
-  const l=logs[k]||{w:'',r:'',last:''};
-  if(l.w&&l.r){
-    l.last=l.w+' lb × '+l.r;
-    l.lw=parseFloat(l.w);   // numeric last weight
-    l.lr=parseInt(l.r);     // numeric last reps
+  const l=logs[k]||{sets:[]};
+  if(!Array.isArray(l.sets)) l.sets=[];
+  l.sets.forEach(s=>{ if(s && (s.w || s.r)) s.done=true; });
+  const used=l.sets.filter(s=>s && (s.done || s.w || s.r));
+  if(used.length){
+    l.last=setSummaryLine(l);
+    // Use the heaviest completed set with numeric weight/reps for the progressive overload hint
+    const numeric=used
+      .map(s=>({w:parseFloat(s.w), r:parseInt(s.r,10)}))
+      .filter(x=>!isNaN(x.w)&&!isNaN(x.r))
+      .sort((a,b)=>b.w-a.w || b.r-a.r);
+    if(numeric.length){ l.lw=numeric[0].w; l.lr=numeric[0].r; }
     logs[k]=l;
     saveLogs();
     render();
@@ -1836,6 +1988,18 @@ function fmtWk(str){
 function weightEntries(){
   return Object.keys(weights).sort().map(k=>({k,w:weights[k]}));
 }
+function latestWeightEntry(){
+  const entries=weightEntries();
+  return entries.length?entries[entries.length-1]:null;
+}
+function latestWeightBefore(isoKey){
+  const entries=weightEntries().filter(e=>e.k<isoKey);
+  return entries.length?entries[entries.length-1]:null;
+}
+function latestWeightOnOrBefore(isoKey){
+  const entries=weightEntries().filter(e=>e.k<=isoKey);
+  return entries.length?entries[entries.length-1]:null;
+}
 
 const weighSave=document.getElementById('weighSave');
 weighSave.onclick=()=>{
@@ -1860,10 +2024,18 @@ function renderProgress(){
   const dEl=document.getElementById('goalDelta');
   dEl.innerHTML = (delta<=0?'':'+')+delta+`<small>lb</small>`;
 
-  // pre-fill this week's input if logged
-  const thisWk=weights[mondayStr(new Date())];
-  if(thisWk!=null && !document.getElementById('weighInput').value){
-    document.getElementById('weighInput').placeholder=thisWk+' (logged)';
+  // pre-fill this week's input if logged; otherwise show the last carried-over weight
+  const thisKey=mondayStr(new Date());
+  const thisWk=weights[thisKey];
+  const lastEntry=latestWeightEntry();
+  const input=document.getElementById('weighInput');
+  if(input && !input.value){
+    if(thisWk!=null) input.placeholder=thisWk+' (logged this week)';
+    else if(lastEntry) input.placeholder='Last: '+lastEntry.w+' lb';
+  }
+  const note=document.getElementById('weighNote');
+  if(note && lastEntry && thisWk==null){
+    note.textContent='Last logged weight carries over: '+lastEntry.w+' lb from week of '+fmtWk(lastEntry.k)+'. Saving now creates this week’s check-in.';
   }
 
   renderChart(entries);
@@ -2369,27 +2541,32 @@ function renderCheckin(){
   document.getElementById('ciWeek').textContent='Week of '+fmtWk(thisKey);
   const cardio=cardioSessionsThisWeek();
 
-  // CASE 1: haven't logged this week's weight yet → prompt
+  // CASE 1: haven't logged this week's weight yet → prompt.
+  // The previous/latest weight is intentionally carried forward across weekly resets.
+  const carried=latestWeightBefore(thisKey);
   if(thisW==null){
     wrap.style.display='';
+    const carryLine=carried ? `<div class="ci-context">Last logged weight carried over: <b>${carried.w} lb</b> from week of ${fmtWk(carried.k)}.</div>` : '';
     body.innerHTML=`
-      <div class="ci-msg">Good morning — time for your weekly weigh-in. Log this morning's weight (fasted, after the bathroom, is most consistent) and I'll compare it to last week.</div>
+      <div class="ci-msg">Good morning — time for your weekly weigh-in. Log this morning's weight (fasted, after the bathroom, is most consistent) and I'll compare it to the last saved check-in.</div>
+      ${carryLine}
       <div class="ci-weighrow">
-        <input id="ciWeightInput" type="number" inputmode="decimal" placeholder="e.g. 168.4">
+        <input id="ciWeightInput" type="number" inputmode="decimal" placeholder="${carried?carried.w:'e.g. 245'}">
         <button onclick="ciLogWeight()">Log weight</button>
       </div>
       <div class="ci-context" style="margin-top:10px">Cardio so far this week: <b>${cardio.s} session${cardio.s===1?'':'s'} · ${cardio.m} min</b></div>`;
     return;
   }
 
-  // CASE 2: this week logged → compare to last week
-  const prevW=weights[prevMondayStr()];
+  // CASE 2: this week logged → compare to the most recent previous check-in, even if the prior week was missed
+  const prevEntry=latestWeightBefore(thisKey);
+  const prevW=prevEntry?prevEntry.w:null;
   wrap.style.display='';
 
   if(prevW==null){
     body.innerHTML=`
       <div class="ci-stat"><span class="ci-big loss">${thisW}</span><span class="ci-sub">lb logged this week</span></div>
-      <div class="ci-msg good">First weigh-in logged. Once you have two weeks in a row, I'll show your weekly change and pace toward ${GOAL_WEIGHT} lb.</div>
+      <div class="ci-msg good">First weigh-in logged. This will carry into next week automatically, and the next check-in will compare against it.</div>
       <div class="ci-context">Cardio this week: <b>${cardio.s} session${cardio.s===1?'':'s'} · ${cardio.m} min</b></div>
       <button class="ci-dismiss" onclick="ciDismiss()">Dismiss for this week</button>`;
     return;
@@ -2429,7 +2606,7 @@ function renderCheckin(){
   else cctx=`You logged <b>${cardio.s} cardio session${cardio.s===1?'':'s'}</b> (${cardio.m} min) — ${cardio.s>=3?'solid, that hits your 3–4 target.':'a bit under the 3–4/week target.'}`;
 
   body.innerHTML=`
-    <div class="ci-stat"><span class="ci-big ${dirClass}">${big}</span><span class="ci-sub">lb vs last week · now ${thisW} lb · ${Math.max(0,Math.round((thisW-GOAL_WEIGHT)*10)/10)} to goal</span></div>
+    <div class="ci-stat"><span class="ci-big ${dirClass}">${big}</span><span class="ci-sub">lb vs ${prevEntry&&prevEntry.k===prevMondayStr()?'last week':'last check-in'} · now ${thisW} lb · ${Math.max(0,Math.round((thisW-GOAL_WEIGHT)*10)/10)} to goal</span></div>
     <div class="ci-msg ${msgClass}">${msg}</div>
     <div class="ci-context">${cctx}</div>
     <div class="ci-msg" style="border-left-color:var(--muted);font-size:.79rem;color:var(--muted)">Reminder: protein and consistency protect muscle far more than eating less. These are options to consider, not instructions — adjust slowly and listen to your body.</div>
@@ -2539,11 +2716,14 @@ function renderDashboard(){
   const weights=loadWeights();
   const s=summarizeWeek(prevISO);
 
-  // weight — find most recent two entries for comparison
-  const allWts=Object.entries(weights).sort((a,b)=>a[0].localeCompare(b[0]));
-  const wThis=allWts.length>0?allWts[allWts.length-1][1]:null;
-  const wPrev=allWts.length>1?allWts[allWts.length-2][1]:null;
-  const wThisKey=allWts.length>0?allWts[allWts.length-1][0]:null;
+  // weight — for last week's dashboard, use the latest weigh-in on/before that week,
+  // then compare it to the most recent weigh-in before that. This prevents a new-week weigh-in
+  // from replacing last week's recap while still carrying progress forward.
+  const wThisEntry=latestWeightOnOrBefore(prevISO);
+  const wPrevEntry=wThisEntry?latestWeightBefore(wThisEntry.k):null;
+  const wThis=wThisEntry?wThisEntry.w:null;
+  const wPrev=wPrevEntry?wPrevEntry.w:null;
+  const wThisKey=wThisEntry?wThisEntry.k:null;
   const TOTAL=totalItemsCount();
 
   // pull raw archived data for extra stats
